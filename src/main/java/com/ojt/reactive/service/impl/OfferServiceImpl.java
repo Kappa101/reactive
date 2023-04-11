@@ -1,12 +1,13 @@
 package com.ojt.reactive.service.impl;
 
 import com.ojt.reactive.service.OfferService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-
+@Slf4j
 @Service
 public class OfferServiceImpl implements OfferService {
     private final WebClient webClient;
@@ -23,7 +24,7 @@ public class OfferServiceImpl implements OfferService {
         return webClient.get().uri("/getOffers?productId=" + productId)
                 .retrieve()
                 .bodyToMono(String.class)
-                .retry(3) // Retry the call up to 3 times
-                .onErrorResume(e -> Mono.just("ProductUnavailable"));
+                .retry(3)
+                .doOnError(e -> log.error("Error while fetching offer for productId : [{}] , thread: [{}] , exception: [{}] ", productId, Thread.currentThread().getName(), e.getMessage()));
     }
 }

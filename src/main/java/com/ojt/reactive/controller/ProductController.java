@@ -14,6 +14,8 @@ public class ProductController {
 
     private final OfferFacade offerFacade;
 
+    private static final String DEFAULT_MESSAGE = "No offers available";
+
     public ProductController(OfferFacade offerFacade) {
         this.offerFacade = offerFacade;
     }

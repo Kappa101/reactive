@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,8 +34,7 @@ public class SkuServiceImpl implements SkuService {
                 .bodyToMono(String.class)
                 .map(skuList -> Arrays.asList(skuList.split(",")))
                 .retry(3)
-                .doOnError(e -> log.error("Error while fetching sku list: {}", e.getMessage()))
-                .onErrorReturn(EMPTY_LIST);
+                .doOnError(e -> log.error("Error while fetching sku list - thread: [{}] , exception: [{}] ", Thread.currentThread().getName(), e.getMessage()));
 
     }
 }
