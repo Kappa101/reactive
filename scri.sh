@@ -1,61 +1,64 @@
-#!/bin/bash
+import React, { useState, useEffect } from "react";
+import { Table, Input } from "@/components/ui";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, Tab } from "@/components/ui/tabs";
+import { Search } from "lucide-react";
 
-# GitLab Configuration
-GITLAB_API_URL="https://gitlab.com/api/v4"
-GROUP_NAME="HIVV_SOE"  # Replace with your GitLab group name
-ACCESS_TOKEN="your_personal_access_token"  # Replace with your token
+const Dashboard = () => {
+  const [data, setData] = useState({});
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState("dependencies");
 
-# Output files
-OUTPUT_FILE="combined_package_data.json"
-MISSING_REPOS_LOG="missing_repos.log"
+  useEffect(() => {
+    fetch("/combined_package_data.json")
+      .then((res) => res.json())
+      .then((json) => setData(json));
+  }, []);
 
-# Clear previous data
-echo "{" > "$OUTPUT_FILE"
-> "$MISSING_REPOS_LOG"
+  const filteredRepos = Object.keys(data).filter((repo) =>
+    repo.toLowerCase().includes(search.toLowerCase())
+  );
 
-PAGE=1
-PER_PAGE=100
-ALL_REPOS=()
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <Card>
+        <CardContent>
+          <div className="flex items-center gap-4 mb-4">
+            <Search className="w-5 h-5" />
+            <Input
+              placeholder="Search repositories..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <Tabs defaultValue="dependencies" onValueChange={setView}>
+            <Tab value="dependencies">Dependencies</Tab>
+            <Tab value="devDependencies">DevDependencies</Tab>
+          </Tabs>
+          <Table>
+            <thead>
+              <tr>
+                <th>Repository</th>
+                <th>{view}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRepos.map((repo) => (
+                <tr key={repo}>
+                  <td>{repo}</td>
+                  <td>
+                    {data[repo][view]
+                      ? Object.keys(data[repo][view]).join(", ")
+                      : "No dependencies"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
-echo "Fetching repositories from GitLab..."
-
-# Fetch all repositories from the GitLab group (handling pagination)
-while true; do
-    RESPONSE=$(curl --silent --header "PRIVATE-TOKEN: $ACCESS_TOKEN" "$GITLAB_API_URL/groups/$GROUP_NAME/projects?per_page=$PER_PAGE&page=$PAGE")
-
-    REPO_NAMES=$(echo "$RESPONSE" | jq -r '.[].path_with_namespace')
-
-    if [ -z "$REPO_NAMES" ]; then
-        break  # No more repositories to fetch
-    fi
-
-    ALL_REPOS+=($REPO_NAMES)
-    ((PAGE++))
-done
-
-echo "Found ${#ALL_REPOS[@]} repositories."
-
-# Loop through each repository and fetch package.json
-for repo in "${ALL_REPOS[@]}"; do
-    echo "Checking package.json for $repo ..."
-
-    PACKAGE_JSON=$(curl --silent --header "PRIVATE-TOKEN: $ACCESS_TOKEN" "$GITLAB_API_URL/projects/$repo/repository/files/package.json/raw?ref=main")
-
-    if [ -z "$PACKAGE_JSON" ]; then
-        echo "⚠️ No package.json found for $repo" >> "$MISSING_REPOS_LOG"
-        continue
-    fi
-
-    # Extract only dependencies and devDependencies
-    EXTRACTED_JSON=$(echo "$PACKAGE_JSON" | jq '{dependencies, devDependencies}')
-
-    # Append to the output file
-    echo "\"$repo\": $EXTRACTED_JSON," >> "$OUTPUT_FILE"
-done
-
-# Remove trailing comma and close JSON object properly
-sed -i '$ s/,$//' "$OUTPUT_FILE"
-echo "}" >> "$OUTPUT_FILE"
-
-echo "✅ Extracted dependencies saved to $OUTPUT_FILE"
-echo "⚠️ Missing repositories logged in $MISSING_REPOS_LOG"
+export default Dashboard;
