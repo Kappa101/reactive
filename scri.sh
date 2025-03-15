@@ -1,45 +1,61 @@
 #!/bin/bash
 
-GROUP_ID="HIVV_SOE"  # Update with your actual GitLab group ID or name
-TOKEN="YOUR_PERSONAL_ACCESS_TOKEN"
-BASE_URL="https://gitlab.com/api/v4"
+# GitLab Configuration
+GITLAB_API_URL="https://gitlab.com/api/v4"
+GROUP_NAME="HIVV_SOE"  # Replace with your GitLab group name
+ACCESS_TOKEN="your_personal_access_token"  # Replace with your token
 
+# Output files
 OUTPUT_FILE="combined_package_data.json"
+MISSING_REPOS_LOG="missing_repos.log"
 
-# Start JSON object
-echo "{" > $OUTPUT_FILE
+# Clear previous data
+echo "{" > "$OUTPUT_FILE"
+> "$MISSING_REPOS_LOG"
 
-# Get all projects in the group that contain "mfe-assisted"
-PROJECTS=$(curl --silent --header "PRIVATE-TOKEN: $TOKEN" "$BASE_URL/groups/$GROUP_ID/projects" | jq -r '.[] | select(.name | contains("mfe-assisted")) | .id')
+PAGE=1
+PER_PAGE=100
+ALL_REPOS=()
 
-if [[ -z "$PROJECTS" ]]; then
-    echo "❌ No repositories found with 'mfe-assisted' in the name."
-    exit 1
-fi
+echo "Fetching repositories from GitLab..."
 
-for PROJECT_ID in $PROJECTS; do
-    # Get project details
-    PROJECT_INFO=$(curl --silent --header "PRIVATE-TOKEN: $TOKEN" "$BASE_URL/projects/$PROJECT_ID")
-    PROJECT_NAME=$(echo "$PROJECT_INFO" | jq -r '.name')
-    DEFAULT_BRANCH=$(echo "$PROJECT_INFO" | jq -r '.default_branch')
+# Fetch all repositories from the GitLab group (handling pagination)
+while true; do
+    RESPONSE=$(curl --silent --header "PRIVATE-TOKEN: $ACCESS_TOKEN" "$GITLAB_API_URL/groups/$GROUP_NAME/projects?per_page=$PER_PAGE&page=$PAGE")
 
-    echo "🔍 Checking $PROJECT_NAME..."
+    REPO_NAMES=$(echo "$RESPONSE" | jq -r '.[].path_with_namespace')
 
-    # Fetch package.json from the default branch
-    PACKAGE_JSON=$(curl --silent --header "PRIVATE-TOKEN: $TOKEN" "$BASE_URL/projects/$PROJECT_ID/repository/files/package.json/raw?ref=$DEFAULT_BRANCH")
-
-    if [[ -n "$PACKAGE_JSON" && "$PACKAGE_JSON" != "null" ]]; then
-        echo "✅ Found package.json for $PROJECT_NAME"
-        
-        # Append package.json data as JSON
-        echo "\"$PROJECT_NAME\": $PACKAGE_JSON," >> $OUTPUT_FILE
-    else
-        echo "⚠️ No package.json found for $PROJECT_NAME"
+    if [ -z "$REPO_NAMES" ]; then
+        break  # No more repositories to fetch
     fi
+
+    ALL_REPOS+=($REPO_NAMES)
+    ((PAGE++))
 done
 
-# Remove last comma and close JSON object
-sed -i '$ s/,$//' $OUTPUT_FILE
-echo "}" >> $OUTPUT_FILE
+echo "Found ${#ALL_REPOS[@]} repositories."
 
-echo "📄 Combined package.json data saved to $OUTPUT_FILE"
+# Loop through each repository and fetch package.json
+for repo in "${ALL_REPOS[@]}"; do
+    echo "Checking package.json for $repo ..."
+
+    PACKAGE_JSON=$(curl --silent --header "PRIVATE-TOKEN: $ACCESS_TOKEN" "$GITLAB_API_URL/projects/$repo/repository/files/package.json/raw?ref=main")
+
+    if [ -z "$PACKAGE_JSON" ]; then
+        echo "⚠️ No package.json found for $repo" >> "$MISSING_REPOS_LOG"
+        continue
+    fi
+
+    # Extract only dependencies and devDependencies
+    EXTRACTED_JSON=$(echo "$PACKAGE_JSON" | jq '{dependencies, devDependencies}')
+
+    # Append to the output file
+    echo "\"$repo\": $EXTRACTED_JSON," >> "$OUTPUT_FILE"
+done
+
+# Remove trailing comma and close JSON object properly
+sed -i '$ s/,$//' "$OUTPUT_FILE"
+echo "}" >> "$OUTPUT_FILE"
+
+echo "✅ Extracted dependencies saved to $OUTPUT_FILE"
+echo "⚠️ Missing repositories logged in $MISSING_REPOS_LOG"
