@@ -1,77 +1,73 @@
-import React, { useEffect, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader } from "lucide-react";
+#!/bin/bash
 
-interface PackageData {
-  [repo: string]: {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-  };
-}
+# GitLab Configuration
+GITLAB_API_URL="https://gitlab.com/api/v4"
+GROUP_NAME=""  # Replace with your GitLab group name
+ACCESS_TOKEN="your_personal_access_token"  # Replace with your GitLab access token
 
-const DependencyDashboard: React.FC = () => {
-  const [data, setData] = useState<PackageData | null>(null);
-  const [loading, setLoading] = useState(true);
+# Output files
+ALL_DEPS_FILE="all_dependencies.json"
+FILTERED_DEPS_FILE="filtered_dependencies.json"
+MISSING_REPOS_LOG="missing_repos.log"
 
-  useEffect(() => {
-    fetch("/combined_package_data.json")
-      .then((res) => res.json())
-      .then((json) => {
-        setData(json);
-        setLoading(false);
-      })
-      .catch((error) => console.error("Error fetching package data:", error));
-  }, []);
+# Clear previous data
+echo "{" > "$ALL_DEPS_FILE"
+echo "{" > "$FILTERED_DEPS_FILE"
+> "$MISSING_REPOS_LOG"
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <Loader className="animate-spin text-gray-500" />
-      </div>
-    );
-  }
+PAGE=1
+PER_PAGE=100
+ALL_REPOS=()
 
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Microfrontend Dependency Dashboard</h1>
-      {data &&
-        Object.entries(data).map(([repo, { dependencies, devDependencies }]) => (
-          <Card key={repo} className="mb-6">
-            <CardContent>
-              <h2 className="text-xl font-semibold mb-2">{repo}</h2>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Package</TableHead>
-                    <TableHead>Version</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {dependencies &&
-                    Object.entries(dependencies).map(([pkg, version]) => (
-                      <TableRow key={pkg}>
-                        <TableCell>Dependency</TableCell>
-                        <TableCell>{pkg}</TableCell>
-                        <TableCell>{version}</TableCell>
-                      </TableRow>
-                    ))}
-                  {devDependencies &&
-                    Object.entries(devDependencies).map(([pkg, version]) => (
-                      <TableRow key={pkg}>
-                        <TableCell>Dev Dependency</TableCell>
-                        <TableCell>{pkg}</TableCell>
-                        <TableCell>{version}</TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        ))}
-    </div>
-  );
-};
+echo "Fetching repositories from GitLab..."
 
-export default DependencyDashboard;
+# Fetch all repositories from the GitLab group (handling pagination)
+while true; do
+    RESPONSE=$(curl --silent --header "PRIVATE-TOKEN: $ACCESS_TOKEN" "$GITLAB_API_URL/groups/$GROUP_NAME/projects?per_page=$PER_PAGE&page=$PAGE")
+
+    REPO_NAMES=$(echo "$RESPONSE" | jq -r '.[].path_with_namespace' | grep "mfe-assisted")
+
+    if [ -z "$REPO_NAMES" ]; then
+        break  # No more repositories to fetch
+    fi
+
+    ALL_REPOS+=($REPO_NAMES)
+    ((PAGE++))
+done
+
+echo "Found ${#ALL_REPOS[@]} repositories matching 'mfe-assisted'."
+
+# Loop through each repository and fetch package.json
+for repo in "${ALL_REPOS[@]}"; do
+    echo "Checking package.json for $repo ..."
+
+    PACKAGE_JSON=$(curl --silent --header "PRIVATE-TOKEN: $ACCESS_TOKEN" "$GITLAB_API_URL/projects/$repo/repository/files/package.json/raw?ref=main")
+
+    if [ -z "$PACKAGE_JSON" ]; then
+        echo "⚠️ No package.json found for $repo" >> "$MISSING_REPOS_LOG"
+        continue
+    fi
+
+    # Extract only dependencies and devDependencies
+    EXTRACTED_JSON=$(echo "$PACKAGE_JSON" | jq '{dependencies, devDependencies}')
+
+    # Append to the all dependencies file
+    echo "\"$repo\": $EXTRACTED_JSON," >> "$ALL_DEPS_FILE"
+
+    # Extract dependencies starting with "vz-soe-utils" or "vzrf"
+    FILTERED_DEPS=$(echo "$PACKAGE_JSON" | jq '{dependencies, devDependencies} | map_values(with_entries(select(.key | startswith("vz-soe-utils") or startswith("vzrf"))))')
+
+    if [[ "$FILTERED_DEPS" != "{}" ]]; then
+        echo "\"$repo\": $FILTERED_DEPS," >> "$FILTERED_DEPS_FILE"
+    fi
+done
+
+# Remove trailing commas and close JSON objects
+sed -i '$ s/,$//' "$ALL_DEPS_FILE"
+sed -i '$ s/,$//' "$FILTERED_DEPS_FILE"
+echo "}" >> "$ALL_DEPS_FILE"
+echo "}" >> "$FILTERED_DEPS_FILE"
+
+echo "✅ Extracted dependencies saved to $ALL_DEPS_FILE"
+echo "✅ Filtered dependencies saved to $FILTERED_DEPS_FILE"
+echo "⚠️ Missing repositories logged in $MISSING_REPOS_LOG"
