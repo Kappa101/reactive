@@ -1,64 +1,77 @@
-import React, { useState, useEffect } from "react";
-import { Table, Input } from "@/components/ui";
+import React, { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, Tab } from "@/components/ui/tabs";
-import { Search } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Loader } from "lucide-react";
 
-const Dashboard = () => {
-  const [data, setData] = useState({});
-  const [search, setSearch] = useState("");
-  const [view, setView] = useState("dependencies");
+interface PackageData {
+  [repo: string]: {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+}
+
+const DependencyDashboard: React.FC = () => {
+  const [data, setData] = useState<PackageData | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/combined_package_data.json")
       .then((res) => res.json())
-      .then((json) => setData(json));
+      .then((json) => {
+        setData(json);
+        setLoading(false);
+      })
+      .catch((error) => console.error("Error fetching package data:", error));
   }, []);
 
-  const filteredRepos = Object.keys(data).filter((repo) =>
-    repo.toLowerCase().includes(search.toLowerCase())
-  );
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <Loader className="animate-spin text-gray-500" />
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <Card>
-        <CardContent>
-          <div className="flex items-center gap-4 mb-4">
-            <Search className="w-5 h-5" />
-            <Input
-              placeholder="Search repositories..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <Tabs defaultValue="dependencies" onValueChange={setView}>
-            <Tab value="dependencies">Dependencies</Tab>
-            <Tab value="devDependencies">DevDependencies</Tab>
-          </Tabs>
-          <Table>
-            <thead>
-              <tr>
-                <th>Repository</th>
-                <th>{view}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRepos.map((repo) => (
-                <tr key={repo}>
-                  <td>{repo}</td>
-                  <td>
-                    {data[repo][view]
-                      ? Object.keys(data[repo][view]).join(", ")
-                      : "No dependencies"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </CardContent>
-      </Card>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Microfrontend Dependency Dashboard</h1>
+      {data &&
+        Object.entries(data).map(([repo, { dependencies, devDependencies }]) => (
+          <Card key={repo} className="mb-6">
+            <CardContent>
+              <h2 className="text-xl font-semibold mb-2">{repo}</h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Package</TableHead>
+                    <TableHead>Version</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dependencies &&
+                    Object.entries(dependencies).map(([pkg, version]) => (
+                      <TableRow key={pkg}>
+                        <TableCell>Dependency</TableCell>
+                        <TableCell>{pkg}</TableCell>
+                        <TableCell>{version}</TableCell>
+                      </TableRow>
+                    ))}
+                  {devDependencies &&
+                    Object.entries(devDependencies).map(([pkg, version]) => (
+                      <TableRow key={pkg}>
+                        <TableCell>Dev Dependency</TableCell>
+                        <TableCell>{pkg}</TableCell>
+                        <TableCell>{version}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        ))}
     </div>
   );
 };
 
-export default Dashboard;
+export default DependencyDashboard;
